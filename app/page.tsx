@@ -446,7 +446,22 @@ export default function TCMAssistant() {
     setIsGeneratingGuidance(false);
   };
 
-  // 处理文档导入 (TXT, 简单文本)
+  // 加载外部脚本
+  const loadScript = (src: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = src;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(script);
+    });
+  };
+
+  // 处理文档导入 (PDF, DOCX, TXT)
   const handleDocumentImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; 
     if (!file) return;
@@ -458,39 +473,89 @@ export default function TCMAssistant() {
     let extractedText = '';
     
     try {
-      setDocProgress(30);
-      
       if (fileName.endsWith('.txt') || fileName.endsWith('.md')) {
         // 纯文本文件
         extractedText = await file.text();
         setDocProgress(100);
       } else if (fileName.endsWith('.pdf')) {
-        // PDF 文件提示
-        setDocProgress(50);
-        // 尝试读取为文本（某些PDF可以）
+        // PDF 文件 - 使用 PDF.js
+        setDocProgress(20);
         try {
-          const text = await file.text();
-          if (text && text.length > 100 && !text.includes('%PDF')) {
-            extractedText = text;
-          } else {
-            // PDF需要特殊处理，建议用户拍照或复制文字
-            alert('PDF文件无法直接提取文字。\n\n建议：\n1. 打开PDF，选择并复制文字，然后粘贴\n2. 或使用"拍照识别"功能拍摄PDF页面');
+          await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+          setDocProgress(30);
+          
+          // @ts-ignore
+          const pdfjsLib = window.pdfjsLib;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          
+          const arrayBuffer = await file.arrayBuffer();
+          setDocProgress(40);
+          
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          const numPages = pdf.numPages;
+          const textParts: string[] = [];
+          
+          for (let i = 1; i <= numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items
+              .map((item: any) => item.str)
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            if (pageText) textParts.push(`【第${i}页】\n${pageText}`);
+            setDocProgress(40 + Math.round((i / numPages) * 55));
+          }
+          
+          extractedText = textParts.join('\n\n');
+          if (!extractedText.trim()) {
+            alert('PDF可能是扫描版（图片），无法提取文字。\n\n建议使用"拍照识别"功能。');
             setIsProcessingDoc(false);
             setDocProgress(0);
             if (documentInputRef.current) documentInputRef.current.value = '';
             return;
           }
-        } catch {
-          alert('PDF文件无法直接提取文字。\n\n建议：\n1. 打开PDF，选择并复制文字，然后粘贴\n2. 或使用"拍照识别"功能拍摄PDF页面');
+          setDocProgress(100);
+        } catch (err) {
+          console.error('PDF parsing error:', err);
+          alert('PDF解析失败，请尝试使用"拍照识别"功能。');
           setIsProcessingDoc(false);
           setDocProgress(0);
           if (documentInputRef.current) documentInputRef.current.value = '';
           return;
         }
-        setDocProgress(100);
-      } else if (fileName.endsWith('.docx') || fileName.endsWith('.doc')) {
-        // Word文档提示
-        alert('Word文档无法直接提取文字。\n\n建议：\n1. 打开Word，选择并复制文字，然后粘贴\n2. 或将Word另存为.txt文件后导入');
+      } else if (fileName.endsWith('.docx')) {
+        // Word DOCX 文件 - 使用 mammoth.js
+        setDocProgress(20);
+        try {
+          await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+          setDocProgress(40);
+          
+          const arrayBuffer = await file.arrayBuffer();
+          setDocProgress(60);
+          
+          // @ts-ignore
+          const result = await window.mammoth.extractRawText({ arrayBuffer });
+          extractedText = result.value;
+          
+          if (!extractedText.trim()) {
+            alert('Word文档内容为空或无法解析。');
+            setIsProcessingDoc(false);
+            setDocProgress(0);
+            if (documentInputRef.current) documentInputRef.current.value = '';
+            return;
+          }
+          setDocProgress(100);
+        } catch (err) {
+          console.error('DOCX parsing error:', err);
+          alert('Word文档解析失败。\n\n建议：打开Word复制文字后粘贴。');
+          setIsProcessingDoc(false);
+          setDocProgress(0);
+          if (documentInputRef.current) documentInputRef.current.value = '';
+          return;
+        }
+      } else if (fileName.endsWith('.doc')) {
+        alert('.doc 是旧版Word格式，无法解析。\n\n请用Word打开后另存为 .docx 格式。');
         setIsProcessingDoc(false);
         setDocProgress(0);
         if (documentInputRef.current) documentInputRef.current.value = '';
@@ -502,11 +567,16 @@ export default function TCMAssistant() {
       }
       
       if (extractedText.trim()) {
+        const cleanText = extractedText
+          .replace(/\r\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
         setNewEntry(p => ({ 
           ...p, 
           title: p.title || file.name.replace(/\.[^/.]+$/, ''),
-          content: p.content + (p.content ? '\n\n' : '') + extractedText.trim() 
+          content: p.content + (p.content ? '\n\n--- 导入内容 ---\n\n' : '') + cleanText
         }));
+        alert(`✅ 成功导入 ${file.name}\n\n提取了约 ${cleanText.length} 个字符`);
       } else {
         alert('无法从文档中提取文本');
       }
@@ -853,8 +923,14 @@ export default function TCMAssistant() {
                   <button style={{ ...s.primaryBtn, background: 'linear-gradient(135deg, #F59E0B, #D97706)' }} onClick={() => documentInputRef.current?.click()}>
                     <Icons.Upload /> 选择文档导入
                   </button>
-                  <div style={{ textAlign: 'center', color: '#888', fontSize: 11 }}>
-                    支持格式：PDF、Word (.docx)、文本 (.txt)
+                  <div style={{ padding: 12, background: '#f0fdf4', borderRadius: 8, fontSize: 12, lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6, color: '#166534' }}>✅ 支持的格式：</div>
+                    <div>• <strong>PDF</strong> - 电子版PDF可直接解析</div>
+                    <div>• <strong>Word (.docx)</strong> - 自动提取文字</div>
+                    <div>• <strong>文本 (.txt, .md)</strong> - 直接导入</div>
+                    <div style={{ marginTop: 8, color: '#666', fontSize: 11 }}>
+                      💡 扫描版PDF请使用"拍照识别"功能
+                    </div>
                   </div>
                 </div>
                 <input ref={documentInputRef} type="file" accept=".pdf,.docx,.doc,.txt,.md" onChange={handleDocumentImport} style={{ display: 'none' }} />
@@ -862,7 +938,7 @@ export default function TCMAssistant() {
                   <div style={{ flex: 1, height: 6, background: '#e0e0e0', borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{ width: `${docProgress}%`, height: '100%', background: '#F59E0B', transition: 'width 0.3s' }}></div>
                   </div>
-                  <span>处理中 {docProgress}%</span>
+                  <span>解析中 {docProgress}%</span>
                 </div>}
               </div>
             )}
