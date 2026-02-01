@@ -446,23 +446,38 @@ export default function TCMAssistant() {
     setIsGeneratingGuidance(false);
   };
 
-  // 加载外部脚本
-  const loadScript = (src: string): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[src="${src}"]`)) {
-        resolve();
-        return;
+  // 加载外部脚本（使用缓存避免重复加载）
+  const loadScriptPromise = useRef<{[key: string]: Promise<void>}>({});
+  
+  const loadScript = useCallback((src: string): Promise<void> => {
+    if (loadScriptPromise.current[src]) {
+      return loadScriptPromise.current[src];
+    }
+    
+    const promise = new Promise<void>((resolve, reject) => {
+      // 检查是否已加载
+      if (typeof window !== 'undefined') {
+        const existing = document.querySelector(`script[src="${src}"]`);
+        if (existing) {
+          resolve();
+          return;
+        }
       }
+      
       const script = document.createElement('script');
       script.src = src;
+      script.async = true;
       script.onload = () => resolve();
       script.onerror = () => reject(new Error(`Failed to load ${src}`));
       document.head.appendChild(script);
     });
-  };
+    
+    loadScriptPromise.current[src] = promise;
+    return promise;
+  }, []);
 
   // 处理文档导入 (PDF, DOCX, TXT)
-  const handleDocumentImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDocumentImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; 
     if (!file) return;
     
@@ -588,7 +603,7 @@ export default function TCMAssistant() {
     setIsProcessingDoc(false);
     setDocProgress(0);
     if (documentInputRef.current) documentInputRef.current.value = '';
-  };
+  }, [loadScript]);
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
