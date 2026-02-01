@@ -391,12 +391,13 @@ export default function TCMAssistant() {
 
   // Merge selected docs
   const handleMerge = async () => {
-    if (selectedDocs.length < 2 || !apiKey) { if (!apiKey) setShowSettings(true); return; }
+    const key = apiKey || ENV_API_KEY;
+    if (selectedDocs.length < 2 || !key) { if (!key && !ENV_API_KEY) setShowSettings(true); return; }
     setIsMerging(true);
     const selected = documents.filter(d => selectedDocs.includes(d.id));
     const content = selected.map((d, i) => `--- 记录${i + 1} (${d.title || d.date}) ---\n${d.content}`).join('\n\n');
     try {
-      const result = await callDeepSeek(apiKey, [{ role: 'user', content }], PROMPTS.merge.replace('{content}', content));
+      const result = await callDeepSeek(key, [{ role: 'user', content }], PROMPTS.merge.replace('{content}', content));
       setMergeResult(result);
       // Save merged result as new document
       const mergedDoc = { title: `合并分析 ${new Date().toLocaleDateString('zh-CN')}`, content: result, source_type: 'note', summary: '多条记录合并分析', tags: ['合并', '分析'] };
@@ -411,11 +412,12 @@ export default function TCMAssistant() {
   const [foundAcupoints, setFoundAcupoints] = useState<string[]>([]);
   
   const handleFindAcupoint = async () => {
-    if (!acupointQuery.trim() || !apiKey) { if (!apiKey) setShowSettings(true); return; }
+    const key = apiKey || ENV_API_KEY;
+    if (!acupointQuery.trim() || !key) { if (!key && !ENV_API_KEY) setShowSettings(true); return; }
     setIsSearchingAcupoint(true);
     setFoundAcupoints([]);
     try {
-      const result = await callDeepSeek(apiKey, [{ role: 'user', content: acupointQuery }], PROMPTS.acupoint);
+      const result = await callDeepSeek(key, [{ role: 'user', content: acupointQuery }], PROMPTS.acupoint);
       setAcupointResult(result);
       
       // 提取穴位名称
@@ -428,10 +430,11 @@ export default function TCMAssistant() {
 
   // Guidance generator
   const handleGenerateGuidance = async () => {
-    if (!guidanceQuery.trim() || !apiKey) { if (!apiKey) setShowSettings(true); return; }
+    const key = apiKey || ENV_API_KEY;
+    if (!guidanceQuery.trim() || !key) { if (!key && !ENV_API_KEY) setShowSettings(true); return; }
     setIsGeneratingGuidance(true);
     try {
-      const result = await callDeepSeek(apiKey, [{ role: 'user', content: guidanceQuery }], PROMPTS.guidance);
+      const result = await callDeepSeek(key, [{ role: 'user', content: guidanceQuery }], PROMPTS.guidance);
       setGuidanceResult(result);
     } catch (e: any) { setGuidanceResult(`❌ 生成失败：${e.message}`); }
     setIsGeneratingGuidance(false);
@@ -548,12 +551,13 @@ export default function TCMAssistant() {
 
   const handleDiagnosis = async () => {
     if (selectedSymptoms.length === 0 && !diagnosisForm.voiceDesc) return;
-    if (!apiKey) { setShowSettings(true); return; }
+    const key = apiKey || ENV_API_KEY;
+    if (!key) { if (!ENV_API_KEY) setShowSettings(true); return; }
     setIsDiagnosing(true); setDiagnosisResult('');
     const latest = healthLogs[0];
     const msg = `症状：${selectedSymptoms.join('、') || '无'}\n语音描述：${diagnosisForm.voiceDesc || '无'}\n病程：${diagnosisForm.duration || '未知'}\n舌象：${diagnosisForm.tongue || '未知'}\n脉象：${diagnosisForm.pulse || '未知'}${latest ? `\n健康数据：步数${latest.steps || '-'} 心率${latest.heart_rate || '-'}` : ''}`;
     try {
-      const result = await callDeepSeek(apiKey, [{ role: 'user', content: msg }], PROMPTS.diagnosis);
+      const result = await callDeepSeek(key, [{ role: 'user', content: msg }], PROMPTS.diagnosis);
       setDiagnosisResult(result + `\n\n---\n📅 ${new Date().toLocaleString('zh-CN')}`);
       if (supabase.isConfigured()) await supabase.addDiagnosisRecord({ symptoms: selectedSymptoms, voice_desc: diagnosisForm.voiceDesc, tongue: diagnosisForm.tongue, pulse: diagnosisForm.pulse, duration: diagnosisForm.duration, result });
     } catch (e: any) { setDiagnosisResult(`❌ 分析失败：${e.message}`); }
@@ -580,11 +584,12 @@ export default function TCMAssistant() {
   };
 
   const handleAsk = async () => {
-    if (!inputText.trim() || !apiKey) { if (!apiKey) setShowSettings(true); return; }
+    const key = apiKey || ENV_API_KEY;
+    if (!inputText.trim() || !key) { if (!key && !ENV_API_KEY) setShowSettings(true); return; }
     setMessages(p => [...p, { role: 'user', content: inputText }]);
     const q = inputText; setInputText(''); setIsLoading(true);
     const knowledge = documents.slice(0, 10).map(d => `【${d.title}】\n${(d.content || '').slice(0, 500)}`).join('\n\n---\n\n') || '暂无';
-    try { const ans = await callDeepSeek(apiKey, [{ role: 'user', content: q }], PROMPTS.qa.replace('{knowledge}', knowledge)); setMessages(p => [...p, { role: 'assistant', content: ans }]); }
+    try { const ans = await callDeepSeek(key, [{ role: 'user', content: q }], PROMPTS.qa.replace('{knowledge}', knowledge)); setMessages(p => [...p, { role: 'assistant', content: ans }]); }
     catch (e: any) { setMessages(p => [...p, { role: 'assistant', content: `❌ ${e.message}` }]); }
     setIsLoading(false);
   };
