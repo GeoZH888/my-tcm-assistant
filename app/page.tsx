@@ -90,6 +90,8 @@ const Icons = {
   Calendar: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
   CheckCircle: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
   Zap: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+  File: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+  Upload: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
 };
 
 // ==================== SOURCE TYPES ====================
@@ -97,6 +99,7 @@ const SOURCE_TYPES = [
   { id: 'camera', label: '拍照识别', icon: Icons.Camera, color: '#10B981' },
   { id: 'voice', label: '语音录入', icon: Icons.Mic, color: '#8B5CF6' },
   { id: 'image', label: '相册图片', icon: Icons.Image, color: '#3B82F6' },
+  { id: 'document', label: '导入文档', icon: Icons.File, color: '#F59E0B' },
   { id: 'video', label: '视频字幕', icon: Icons.Video, color: '#EF4444' },
   { id: 'wechat', label: '微信聊天', icon: Icons.Wechat, color: '#07C160' },
   { id: 'wechat_group', label: '微信群聊', icon: Icons.Users, color: '#07C160' },
@@ -316,6 +319,9 @@ export default function TCMAssistant() {
   const [ocrProgress, setOcrProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
+  const [isProcessingDoc, setIsProcessingDoc] = useState(false);
+  const [docProgress, setDocProgress] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [showCamera, setShowCamera] = useState(false);
@@ -438,6 +444,80 @@ export default function TCMAssistant() {
       setGuidanceResult(result);
     } catch (e: any) { setGuidanceResult(`❌ 生成失败：${e.message}`); }
     setIsGeneratingGuidance(false);
+  };
+
+  // 处理文档导入 (TXT, 简单文本)
+  const handleDocumentImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; 
+    if (!file) return;
+    
+    setIsProcessingDoc(true);
+    setDocProgress(10);
+    
+    const fileName = file.name.toLowerCase();
+    let extractedText = '';
+    
+    try {
+      setDocProgress(30);
+      
+      if (fileName.endsWith('.txt') || fileName.endsWith('.md')) {
+        // 纯文本文件
+        extractedText = await file.text();
+        setDocProgress(100);
+      } else if (fileName.endsWith('.pdf')) {
+        // PDF 文件提示
+        setDocProgress(50);
+        // 尝试读取为文本（某些PDF可以）
+        try {
+          const text = await file.text();
+          if (text && text.length > 100 && !text.includes('%PDF')) {
+            extractedText = text;
+          } else {
+            // PDF需要特殊处理，建议用户拍照或复制文字
+            alert('PDF文件无法直接提取文字。\n\n建议：\n1. 打开PDF，选择并复制文字，然后粘贴\n2. 或使用"拍照识别"功能拍摄PDF页面');
+            setIsProcessingDoc(false);
+            setDocProgress(0);
+            if (documentInputRef.current) documentInputRef.current.value = '';
+            return;
+          }
+        } catch {
+          alert('PDF文件无法直接提取文字。\n\n建议：\n1. 打开PDF，选择并复制文字，然后粘贴\n2. 或使用"拍照识别"功能拍摄PDF页面');
+          setIsProcessingDoc(false);
+          setDocProgress(0);
+          if (documentInputRef.current) documentInputRef.current.value = '';
+          return;
+        }
+        setDocProgress(100);
+      } else if (fileName.endsWith('.docx') || fileName.endsWith('.doc')) {
+        // Word文档提示
+        alert('Word文档无法直接提取文字。\n\n建议：\n1. 打开Word，选择并复制文字，然后粘贴\n2. 或将Word另存为.txt文件后导入');
+        setIsProcessingDoc(false);
+        setDocProgress(0);
+        if (documentInputRef.current) documentInputRef.current.value = '';
+        return;
+      } else {
+        // 尝试作为文本读取
+        extractedText = await file.text();
+        setDocProgress(100);
+      }
+      
+      if (extractedText.trim()) {
+        setNewEntry(p => ({ 
+          ...p, 
+          title: p.title || file.name.replace(/\.[^/.]+$/, ''),
+          content: p.content + (p.content ? '\n\n' : '') + extractedText.trim() 
+        }));
+      } else {
+        alert('无法从文档中提取文本');
+      }
+    } catch (err) {
+      console.error('Document processing error:', err);
+      alert('文档处理失败');
+    }
+    
+    setIsProcessingDoc(false);
+    setDocProgress(0);
+    if (documentInputRef.current) documentInputRef.current.value = '';
   };
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -762,6 +842,27 @@ export default function TCMAssistant() {
                     <div style={{ width: `${ocrProgress}%`, height: '100%', background: '#10B981', transition: 'width 0.3s' }}></div>
                   </div>
                   <span>识别中 {ocrProgress}%</span>
+                </div>}
+              </div>
+            )}
+
+            {/* 文档导入 */}
+            {newEntry.sourceType === 'document' && (
+              <div style={s.section}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <button style={{ ...s.primaryBtn, background: 'linear-gradient(135deg, #F59E0B, #D97706)' }} onClick={() => documentInputRef.current?.click()}>
+                    <Icons.Upload /> 选择文档导入
+                  </button>
+                  <div style={{ textAlign: 'center', color: '#888', fontSize: 11 }}>
+                    支持格式：PDF、Word (.docx)、文本 (.txt)
+                  </div>
+                </div>
+                <input ref={documentInputRef} type="file" accept=".pdf,.docx,.doc,.txt,.md" onChange={handleDocumentImport} style={{ display: 'none' }} />
+                {isProcessingDoc && <div style={{ marginTop: 8, padding: 10, background: '#fff8e1', borderRadius: 6, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, height: 6, background: '#e0e0e0', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${docProgress}%`, height: '100%', background: '#F59E0B', transition: 'width 0.3s' }}></div>
+                  </div>
+                  <span>处理中 {docProgress}%</span>
                 </div>}
               </div>
             )}
