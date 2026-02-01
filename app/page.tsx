@@ -447,11 +447,12 @@ export default function TCMAssistant() {
   };
 
   // 加载外部脚本（使用缓存避免重复加载）
-  const loadScriptPromise = useRef<{[key: string]: Promise<void>}>({});
+  const loadScriptCache = useRef<{[key: string]: Promise<void> | null}>({});
   
   const loadScript = useCallback((src: string): Promise<void> => {
-    if (loadScriptPromise.current[src]) {
-      return loadScriptPromise.current[src];
+    const cached = loadScriptCache.current[src];
+    if (cached) {
+      return cached;
     }
     
     const promise = new Promise<void>((resolve, reject) => {
@@ -472,7 +473,7 @@ export default function TCMAssistant() {
       document.head.appendChild(script);
     });
     
-    loadScriptPromise.current[src] = promise;
+    loadScriptCache.current[src] = promise;
     return promise;
   }, []);
 
